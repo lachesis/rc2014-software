@@ -1,0 +1,399 @@
+SECTION CODE
+
+main:
+    ; (Line buffer code)
+    ; Read a character
+    ;   Add it to the line buffer
+    ;   If it's a backspace, move the buffer pointer back
+    ;   If it's an ENTER, "commit" the buffer - Add a \0 and execute over it like below
+    ;   If it's a Ctrl-C, do a top-level RET to get back to BASIC
+    ; Loop
+    ; (Committing a buffer)
+    ; Read a character from the buffer
+    ;   If it's a digit, add it to the current digit
+    ;   If it's whitespace, dump the digit on to the stack
+    ;   If it's an operator, apply it to the stack
+    ;   If it's a \0, go back to line-buffer mode
+    ; Loop
+
+    push hl
+    push bc
+    push de
+    push ix
+    push iy
+    ld hl, starthelp
+    call print
+    ld a, 0
+    ld (curnum), a
+    ld (numvalid), a
+    ld de, datastack
+
+bufread:
+    ld hl, prompt
+    call print
+    ld hl, linebuf
+bufchar:
+    rst 10H     ; Read a character into A
+    cp '\r'     ; Newline?
+    jr z, exec
+    cp '\b'     ; Backspace?
+    jr z, backspace
+    cp 3        ; Ctrl-C?
+    jr z, exit
+    ; Otherwise, this is a basic character - add it to the buf
+    ld (hl), a
+    inc hl
+    rst 8H  ; Also echo it
+
+    jr bufchar
+
+exit:
+    ; Return to BASIC
+    ld hl, goodbye
+    call print
+
+    pop iy
+    pop ix
+    pop de
+    pop bc
+    pop hl
+    ret
+
+backspace:
+    ; 16 bit compare bc (linebuf) with hl
+    ld bc, linebuf
+    or a
+    sbc hl, bc
+    add hl, bc
+
+    ; If equal, don't decrement HL anymore - just jump back
+    jr z, bufchar
+
+    ; Print a backspace
+    ld a, '\b'
+    rst 8H
+
+    ; Print a space
+    ld a, ' '
+    rst 8H
+
+    ; Print a backspace
+    ld a, '\b'
+    rst 8H
+
+    dec hl
+    jr bufchar
+
+print:
+    ld a, (hl)
+    or a
+    ret z
+    rst 8H          ; Tx byte
+    inc hl
+    jr print
+
+exec:       ; Print a *, then message, then another *
+    ; Null-terminate the buffer
+    ld (hl), 0
+
+    ; Print a newline
+    ld hl, nl
+    call print
+
+    ld ix, linebuf
+    dec ix
+procchar:       ; Process a character
+    inc ix
+    ld a, (ix)
+
+    cp '\0'     ; Exit if we're done
+    jr z, procdone
+
+    cp ' '      ; Dump a number (if one exists)
+    jr z, procpushnum
+
+    cp '+'
+    jr z, opplus
+
+    cp '-'
+    jr z, opminus
+
+    cp '&'
+    jr z, opand
+
+    cp '|'
+    jr z, opor
+
+    cp '^'
+    jr z, opxor
+
+    cp 'p'
+    jr z, opprint
+
+    ; TODO: compare to determine if it's a digit
+    jr loaddigit
+
+procdone:
+    call pushnum
+    jr bufread
+
+procpushnum:
+    call pushnum
+    jr procchar
+
+opplus:
+    ; Pop two numbers from the stack
+    call dspop
+    ld b, a
+    call dspop
+    ; Add them
+    add a, b
+    ; Push the result
+    ld (de), a
+    inc de
+    ; Back to mainloop
+    jr procchar
+
+opminus:
+    ; Pop two numbers from the stack
+    call dspop
+    ld b, a
+    call dspop
+    ; Subtract them
+    sub a, b
+    ; Push the result
+    ld (de), a
+    inc de
+    ; Back to mainloop
+    jr procchar
+
+opand:
+    ; Pop two numbers from the stack
+    call dspop
+    ld b, a
+    call dspop
+    ; Logic
+    and a, b
+    ; Push the result
+    ld (de), a
+    inc de
+    ; Back to mainloop
+    jr procchar
+
+opor:
+    ; Pop two numbers from the stack
+    call dspop
+    ld b, a
+    call dspop
+    ; Logic
+    or a, b
+    ; Push the result
+    ld (de), a
+    inc de
+    ; Back to mainloop
+    jr procchar
+
+opxor:
+    ; Pop two numbers from the stack
+    call dspop
+    ld b, a
+    call dspop
+    ; Logic
+    xor a, b
+    ; Push the result
+    ld (de), a
+    inc de
+    ; Back to mainloop
+    jr procchar
+
+opprint:
+    ; Pop a number from the data stack, and print it
+    call dspop
+    call writenum
+
+    ; Print newline
+    ld hl, nl
+    call print
+
+    jr procchar
+
+pushnum:
+    ld a, (numvalid)
+    or a
+    ret z           ; If the num is invalid, return immediately
+
+    ; Otherwise, push curnum onto the datastack
+    ld a, (curnum)
+    ld (de), a
+    inc de
+
+    ; Clear curnum and numvalid
+    ld a, 0
+    ld (numvalid), a
+    ld (curnum), a
+
+    ; Return
+    ret
+
+loaddigit:
+    ld a, (curnum)
+    ld b, a         ; Load the previous number into B
+    ld a, (ix)      ; Load the current digit pointed at by IX into a
+    sub '0'         ; Convert from ASCII to DEC
+
+    ld c, a
+    ld a, b
+
+    ; Fixed multiply by 10, blame Za3k
+    ld a, b
+    rlca
+    ld b, a
+    rlca
+    rlca
+    add b
+
+    ; Add the current digit
+    add c
+
+    ; Save the result out
+    ld (curnum), a
+
+    ; Mark the current number as valid
+    ld a, 1
+    ld (numvalid), a
+
+    jp procchar
+
+dspop:          ; Pop from the datastack; result in A; print err on underflow; smashes hl, af; moves de back one
+    ; Compare the current datastack to the beginning (ensure no underflow)
+    push bc
+    ld h, d
+    ld l, e
+    ld bc, datastack
+    or a        ; Clear carry
+    sbc hl, bc  ; Subtract head of stack from current ptr
+    jr z, dspopunder
+
+    ; Actually pop
+    dec de
+    ld a, (de)
+    pop bc
+    ret
+
+dspopunder:
+    ld hl, errpopunder
+    call print
+    ld a, 0
+    pop bc
+    ret
+
+
+
+
+
+
+
+
+readnum:            ; Read a decimal number from current buf pointer (in HL) to \0 or ' '
+                    ; Return the result in A
+                    ; Leaves HL pointing to the char after the number
+                    ; Sets the Z flag if there was no number
+    push bc
+    ld b, 0         ; Previous digits number stored in B
+    dec hl
+readdigit:          ; Returns decimal digit in A
+    inc hl
+    ld a, (hl)
+    cp 0            ; End of buffer?
+    jr z, rndone
+    cp ' '          ; Space?
+    jr z, rndone
+
+    ; Read the digit, and store it in C
+    sub 48
+    ld c, a
+
+    ld a, b
+    ;call writenum
+
+    ; Fixed multiply by 10, blame Za3k
+    ld a, b
+    rlca
+    ld b, a
+    rlca
+    rlca
+    add b
+
+    ;call writenum
+
+    ; A contains previous digits with a zero in the ones place
+    ; B contains garbage
+    ; C contains the current digit
+
+    ; Add the current digit
+    add c
+    ;call writenum
+
+    ; Store the accumulated value to B
+    ld b, a
+
+    jr readdigit
+rndone:
+    ld a, b
+    pop bc
+    ret             ; return the byte read in a
+
+
+
+writedigit:         ; Writes digit that is in A
+    add '0'
+    rst 8H
+    ret
+
+writenum:
+    push af
+    push bc
+    push de
+    ld b, 0
+    div10a:
+        sub 10
+        jr c, div10adone
+        inc b
+        jr div10a
+    div10adone: add 10
+    ld c, a
+    ld a, b
+    ld b, 0
+    div10b:
+        sub 10
+        jr c, div10bdone
+        inc b
+        jr div10b
+    div10bdone: add 10
+    ld d, a
+
+    ld a, b
+    call writedigit
+    ld a, d
+    call writedigit
+    ld a, c
+    call writedigit
+writenumdone:
+    pop de
+    pop bc
+    pop af
+    ret
+
+SECTION DATA
+
+starthelp:      DEFM "* Welcome to LineCalc *",10,13,"Press Ctrl-C to exit",10,13,0
+goodbye:        DEFM "Goodbye!",10,13,0
+prompt:         DEFM "> ", 0
+errpopunder:    DEFM "Error: data stack underflow", 10, 13, 0
+nl:             DEFM 10, 13, 0
+
+linebuf:    DEFS 128
+savesp:     DEFS 2
+datastack:  DEFS 128
+curnum:     DEFS 1
+numvalid:   DEFS 1
