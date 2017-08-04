@@ -1,0 +1,116 @@
+SECTION CODE
+
+main:
+    ; (Line buffer code)
+    ; Read a character
+    ;   Add it to the line buffer
+    ;   If it's a backspace, move the buffer pointer back
+    ;   If it's an ENTER, "commit" the buffer - Add a \0 and execute over it like below
+    ;   If it's a Ctrl-C, do a top-level RET to get back to BASIC
+    ; Loop
+    ; (Committing a buffer)
+    ; Read a character from the buffer
+    ;   If it's a digit, add it to the current digit
+    ;   If it's whitespace, dump the digit on to the stack
+    ;   If it's an operator, apply it to the stack
+    ;   If it's a \0, go back to line-buffer mode
+    ; Loop
+
+    push hl
+    ld hl, starthelp
+    call print
+
+bufread:
+    ld hl, prompt
+    call print
+    ld hl, linebuf
+bufchar:
+    rst 10H     ; Read a character into A
+    cp '\r'     ; Newline?
+    jr z, exec
+    cp '\b'     ; Backspace?
+    jr z, backspace
+    cp 3        ; Ctrl-C?
+    jr z, exit
+    ; Otherwise, this is a basic character - add it to the buf
+    ld (hl), a
+    inc hl
+    rst 8H  ; Also echo it
+
+    jr bufchar
+
+exec:       ; Print a *, then message, then another *
+    ; Null-terminate the buffer
+    ld (hl), 0
+
+    ; Print a newline
+    ld hl, nl
+    call print
+
+    ; Print a *
+    ld a, '*'
+    rst 8H
+
+    ; Print the message
+    ld hl, linebuf
+    call print
+
+    ; Print another *
+    ld a, '*'
+    rst 8H
+
+    ; Print newline
+    ld hl, nl
+    call print
+
+    jr bufread
+
+exit:
+    ; Return to BASIC
+    ld hl, goodbye
+    call print
+    pop hl
+    ret
+
+backspace:
+    ; 16 bit compare bc (linebuf) with hl
+    ld bc, linebuf
+    or a
+    sbc hl, bc
+    add hl, bc
+
+    ; If equal, don't decrement HL anymore - just jump back
+    jr z, bufchar
+
+    ; Print a backspace
+    ld a, '\b'
+    rst 8H
+
+    ; Print a space
+    ld a, ' '
+    rst 8H
+
+    ; Print a backspace
+    ld a, '\b'
+    rst 8H
+
+    dec hl
+    jr bufchar
+
+print:
+    ld a, (hl)
+    or a
+    ret z
+    rst 8H          ; Tx byte
+    inc hl
+    jr print
+
+SECTION DATA
+
+starthelp:      DEFM "* Welcome to LineCalc *",10,13,"Press Ctrl-C to exit",10,13,0
+goodbye:        DEFM "Goodbye!",10,13,0
+prompt:         DEFM "> ", 0
+nl:             DEFM 10, 13, 0
+
+linebuf:    DEFS 128
+stackptr:   DEFS 2

@@ -1,0 +1,236 @@
+SECTION CODE
+
+init:
+    push hl
+    push bc
+    push de
+    ld (begin_sp), sp
+    ld hl, MODE_IDLE
+    ld (modeptr), hl
+    jr idleblink
+
+exit:
+    ld a, 0
+    out (0), a
+    ld hl, GOODBYE
+    call print
+    ld sp, (begin_sp)
+    pop de
+    pop bc
+    pop hl
+    ret
+
+inphandler:
+    ld c, a
+    rst 18H
+    jr nz, kbdinp
+    in a, (0)
+    cp 01H
+    jp z, cylon
+    cp 02H
+    jp z, bincount
+    cp 04H
+    jp z, greycount
+    cp 08H
+    jp z, prng
+    cp 80H
+    jp z, dark
+    ld a, c
+    ret
+
+kbdinp:
+    rst 10H  ; Get a byte from serial
+    cp 'q'
+    jr z, exit
+    cp '1'
+    jr z, cylon
+    cp '2'
+    jr z, bincount
+    cp '3'
+    jr z, greycount
+    cp '4'
+    jr z, prng
+    cp '8'
+    jr z, dark
+    ret
+
+display:
+    out (0), a
+    call writebin
+    call delay
+    call inphandler
+    ret
+
+prng:
+    ld hl, MODE_PRNG
+    ld (modeptr), hl
+prngloop:
+    call random
+    call display
+    jr prngloop
+
+idleblink:
+    ld hl, MODE_IDLE
+    ld (modeptr), hl
+idleblinkloop:
+    ld a, 01H
+    call display
+    ld a, 80H
+    call display
+    jr idleblinkloop
+
+dark:
+    ld hl, MODE_DARK
+    ld (modeptr), hl
+darkloop:
+    ld a, 0
+    call display
+    jr darkloop
+
+greycount:
+    ld hl, MODE_GREYCOUNT
+    ld (modeptr), hl
+    ld b, 0
+greycountloop:
+    inc b
+    ld a, b
+    scf
+    ccf
+    rrca
+    xor b
+    call display
+    jr greycountloop
+
+bincount:
+    ld hl, MODE_BINCOUNT
+    ld (modeptr), hl
+    ld a, 0
+bincountloop:
+    inc a
+    call display
+    jr bincountloop
+
+cylon:
+    ld hl, MODE_CYLON
+    ld (modeptr), hl
+    ld a, 1
+cylonloop1:
+    call display
+    scf
+    ccf
+    rlca
+    cp 80H
+    jr nz, cylonloop1
+cylonloop2:
+    call display
+    scf
+    ccf
+    rrca
+    cp 01H
+    jr nz, cylonloop2
+    jr cylonloop1
+
+delay:
+    push af
+    push bc
+    ld bc, 0000H
+delayloop1:
+    dec c
+    jr nz, delayloop1
+    dec b
+    jr nz, delayloop1
+    ld a, h
+    ;or l
+    ;jr z, delayloopdone
+    ;dec hl
+    ;jr delayloop1
+delayloopdone:
+    pop bc
+    pop af
+    ret
+
+;-----> Generate a random number
+; ouput a=answer 0<=a<=255
+; all registers are preserved except: af
+random:
+        push    hl
+        push    de
+        ld      hl,(randdata)
+        ld      a,r
+        ld      d,a
+        ld      e,(hl)
+        add     hl,de
+        add     a,l
+        xor     h
+        ld      (randdata),hl
+        pop     de
+        pop     hl
+        ret
+
+writebin:
+        push af
+        push de
+        push hl
+        ld d, a
+        ld e, 9
+        ld a, 0CH
+        rst 8H
+        ld hl, MSG
+        call print
+        ld hl, (modeptr)
+        call print
+        ld a, d
+writebinloop:
+        dec e
+        jr z, writebindone
+        rlca
+        jr c, write1
+write0:
+        ld d, a
+        ld a, '-'
+        rst 8H
+        ld a, d
+        jr writebinloop
+write1:
+        ld d, a
+        ld a, '*'
+        rst 8H
+        ld a, d
+        jr writebinloop
+writebindone:
+        ld a, '\n'
+        rst 8H
+        ld a, '\r'
+        rst 8H
+        ld a, d
+        pop hl
+        pop de
+        pop af
+        ret
+
+
+print:
+    ld a, (hl)
+    or a
+    ret z
+    rst 8H          ; Tx byte
+    inc hl
+    jr print
+
+SECTION DATA
+
+curop_8:    DEFM 0
+curval_8:   DEFM 0
+delay_16:   DEFM 0, 4
+begin_sp:   DEFM 0, 0
+randdata:   DEFM 5EH, 94H
+modeptr:     DEFM 0, 0
+GOODBYE:    DEFM "Goodbye!", 10, 13, 0
+MSG:        DEFM "Running display program! ('q' to quit)", 10, 13, 0
+MODE_CYLON: DEFM "  -- CYLON MODE --  ", 10, 13, 0
+MODE_BINCOUNT: DEFM "  -- BINARY COUNTER MODE --  ", 10, 13, 0
+MODE_GREYCOUNT: DEFM "  -- GREY CODE COUNTER MODE --  ", 10, 13, 0
+MODE_PRNG: DEFM "  -- PRNG MODE --  ", 10, 13, 0
+MODE_DARK: DEFM "  -- DARK MODE --  ", 10, 13, 0
+MODE_IDLE: DEFM "  -- IDLE BLINK MODE -- ", 10, 13, 0
+nl:             DEFM 10, 13, 0

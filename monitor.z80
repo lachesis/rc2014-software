@@ -110,112 +110,34 @@ procchar:       ; Process a character
     jr z, procdone
 
     cp ' '      ; Dump a number (if one exists)
-    jr z, procpushnum
+    jr z, procendtok
 
-    cp '+'
-    jr z, opplus
+    cp 'c'      ; Cylon mode
+    jr z, opcylon
 
-    cp '-'
-    jr z, opminus
-
-    cp '&'
-    jr z, opand
-
-    cp '|'
-    jr z, opor
-
-    cp '^'
-    jr z, opxor
-
-    cp 'p'
-    jr z, opprint
-
-    ; TODO: compare to determine if it's a digit
-    jr loaddigit
+    ; Ignore unknown
+    jr procchar
 
 procdone:
-    call pushnum
+    call handletok
     jr bufread
 
 procpushnum:
-    call pushnum
+    call handletok
     jr procchar
 
-opplus:
-    ; Pop two numbers from the stack
-    call dspop
-    ld b, a
-    call dspop
-    ; Add them
-    add a, b
-    ; Push the result
-    ld (de), a
-    inc de
-    ; Back to mainloop
-    jr procchar
+handletok:
+    ret
 
-opminus:
-    ; Pop two numbers from the stack
-    call dspop
-    ld b, a
-    call dspop
-    ; Subtract them
-    sub a, b
-    ; Push the result
-    ld (de), a
-    inc de
-    ; Back to mainloop
-    jr procchar
+opcylon:
+    ret
 
-opand:
-    ; Pop two numbers from the stack
-    call dspop
-    ld b, a
-    call dspop
-    ; Logic
-    and a, b
-    ; Push the result
-    ld (de), a
-    inc de
-    ; Back to mainloop
-    jr procchar
 
-opor:
-    ; Pop two numbers from the stack
-    call dspop
-    ld b, a
-    call dspop
-    ; Logic
-    or a, b
-    ; Push the result
-    ld (de), a
-    inc de
-    ; Back to mainloop
-    jr procchar
 
-opxor:
-    ; Pop two numbers from the stack
-    call dspop
-    ld b, a
-    call dspop
-    ; Logic
-    xor a, b
-    ; Push the result
-    ld (de), a
-    inc de
-    ; Back to mainloop
-    jr procchar
 
-opprint:
-    ; Pop a number from the data stack, and print it
-    call dspop
-    call writenum
 
-    ; Print newline
-    ld hl, nl
-    call print
 
-    jr procchar
+
 
 pushnum:
     ld a, (numvalid)
@@ -264,7 +186,7 @@ loaddigit:
 
     jp procchar
 
-dspop:          ; Pop from the datastack; result in A; print err on underflow; smashes hl, af; moves de back one
+dspop:          ; Pop from the datastack in DE; result in A; print err on underflow; smashes hl, af; moves de back one
     ; Compare the current datastack to the beginning (ensure no underflow)
     push bc
     ld h, d
@@ -288,60 +210,6 @@ dspopunder:
     ret
 
 
-
-
-
-
-
-
-readnum:            ; Read a decimal number from current buf pointer (in HL) to \0 or ' '
-                    ; Return the result in A
-                    ; Leaves HL pointing to the char after the number
-                    ; Sets the Z flag if there was no number
-    push bc
-    ld b, 0         ; Previous digits number stored in B
-    dec hl
-readdigit:          ; Returns decimal digit in A
-    inc hl
-    ld a, (hl)
-    cp 0            ; End of buffer?
-    jr z, rndone
-    cp ' '          ; Space?
-    jr z, rndone
-
-    ; Read the digit, and store it in C
-    sub 48
-    ld c, a
-
-    ld a, b
-    ;call writenum
-
-    ; Fixed multiply by 10, blame Za3k
-    ld a, b
-    rlca
-    ld b, a
-    rlca
-    rlca
-    add b
-
-    ;call writenum
-
-    ; A contains previous digits with a zero in the ones place
-    ; B contains garbage
-    ; C contains the current digit
-
-    ; Add the current digit
-    add c
-    ;call writenum
-
-    ; Store the accumulated value to B
-    ld b, a
-
-    jr readdigit
-rndone:
-    ld a, b
-    pop bc
-    ret             ; return the byte read in a
 
 
 
